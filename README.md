@@ -1,3 +1,3 @@
 # installe_srv_web_fedora
 
-**EN DEVELOPPEMENT**
+**EN DEVELOPPEMENT - IN DEVELOPMENT**
