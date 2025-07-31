@@ -8,8 +8,7 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-DOSSIER_BDD="/srv/bdd"
-
+# Teste si le script est lancé en tant que root
 if [[ $EUID -ne 0 ]]; then
     echo "\033[31mCe script doit être exécuté en tant que root !\033[0m"
     exit 1
@@ -27,6 +26,18 @@ for arg in "$@"; do
     --composer) COMPOSER=true ;;
   esac
 done
+
+if $MARIADB || $PGSQL ]]; then
+
+    # Dossier de stockage des données des BDD
+    DOSSIER_BDD="/srv/bdd"
+
+    # Si le dossier n'existe pas, on le créer
+    if [[ ! -d "${DOSSIER_BDD}" ]]; then
+        mkdir -p $DOSSIER_BDD
+    fi
+
+fi 
 
 echo "Installation des paquets pour httpd et php-fpm ..."
 dnf install -y httpd php php-gd php-zip php-xml php-fpm php-cli php-common policycoreutils-python-utils mod_ssl
@@ -58,7 +69,6 @@ if $MARIADB; then
     rsync -av /var/lib/mysql/ $DOSSIER_BDD/mariadb/
     chown -R mysql:mysql $DOSSIER_BDD/mariadb
 
-    # SELinux pour MariaDB
     echo "Configuration SELinux pour MariaDB..."
     semanage fcontext -a -t mysqld_db_t "${DOSSIER_BDD}/mariadb(/.*)?"
     restorecon -Rv $DOSSIER_BDD/mariadb
@@ -82,7 +92,6 @@ if $PGSQL; then
     chown postgres:postgres $DOSSIER_BDD/postgresql
     sudo -u postgres /usr/bin/initdb -D $DOSSIER_BDD/postgresql
 
-    # SELinux pour PostgreSQL (optionnel mais prudent)
     echo "Configuration SELinux pour PostgreSQL..."
     semanage fcontext -a -t postgresql_db_t "${DOSSIER_BDD}/postgresql(/.*)?"
     restorecon -Rv /srv/bdd/postgresql
@@ -100,17 +109,20 @@ if $PGSQL; then
 fi
 
 if $COMPOSER; then
-    echo "Téléchargementr de composer ..."
-
+    echo "Téléchargement de composer ..."  
     php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
-    php -r "if (hash_file('sha384', 'composer-setup.php') === 'dac665fdc30fdd8ec78b38b9800061b4150413ff2e3b6f88543c636f7cd84f6db9189d43a81e5503cda447da73c7e5b6') { echo 'Installer verified'.PHP_EOL; } else { echo 'Installer corrupt'.PHP_EOL; unlink('composer-setup.php'); exit(1); }"
-    php composer-setup.php
-    php -r "unlink('composer-setup.php');"
+    
+    HASH_ORIGINE=$(curl -s https://composer.github.io/installer.sig)
+    HASH_FICHIER=$(php -r "echo hash_file('SHA384', 'composer-setup.php');")
 
-    if [ -e "composer.phar" ]; then
-        echo "Copie de composer.phar dans /usr/local/bin/ ..."
-        mv composer.phar /usr/local/bin/composer
+    if [ "$HASH_ORIGINE" != "HASH_FICHIER" ]; then
+        echo "Le fichier téléchargé n'est pas correct !";
+        rm composer-setup.php
+        exit 1
     fi
+
+    php composer-setup.php --install_dir=/usr/local/bin --filename=composer
+    rm composer-setup.php
 fi
 
 echo "Installation terminée !"
